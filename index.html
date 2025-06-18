@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>code</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000000;
+            font-family: 'Arial', sans-serif;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .code-background {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 800px;
+            text-align: center;
+            opacity: 0.1;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #ffffff;
+            pointer-events: none;
+            user-select: none;
+            white-space: pre;
+            z-index: 1;
+        }
+
+        .copy-button {
+            position: relative;
+            padding: 18px 48px;
+            background: linear-gradient(45deg, #000000 0%, #858585 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            transition: all 0.4s cubic-bezier(0.65, 0, 0.35, 1);
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        .copy-button:hover {
+            transform: translateY(-1px) scale(1.015);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .copy-button:active {
+            transform: translateY(1px);
+        }
+
+        .copy-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transition: 0.6s;
+        }
+
+        .copy-button:hover::before {
+            left: 100%;
+        }
+
+        .copy-button.copied {
+            width: 60px;
+            height: 60px;
+            padding: 0;
+            border-radius: 50%;
+            background: #4CAF50;
+            transform: scale(1);
+        }
+
+        .copy-button.copied::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 30px;
+        }
+
+        .copy-button.copied span {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .code-background {
+                font-size: 12px;
+                width: 95%;
+            }
+            
+            .copy-button {
+                padding: 15px 40px;
+                font-size: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <pre class="code-background">
+// ==UserScript==
+// @name         n+1番目
+// @namespace    http://tampermonkey.net/
+// @version      1.5
+// @description  none
+// @author       user
+// @match        https://www.nnn.ed.nico/*
+// @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    // 設定値
+    const STOP_BEFORE_END = 10; // 動画終了前（秒）
+    const CHECK_INTERVAL = 1000; // n+1番目を確認する間隔（ミリ秒）
+    const MAX_RETRY = 5; // 最大リトライ数
+
+    // 優先順位定義
+    const PRIORITY_TEXTS = [
+        "論述式レポート※観点別評価（思考・判断・表現／主体的に取り組む態度）", // 最優先
+        "選択・記述式レポート※観点別評価（知識・技能）" // 次優先
+    ];
+
+    // 状態管理へんすう
+    let lastUrl = location.href;
+    let isAutoPlayEnabled = true;
+    let currentVideoElement = null;
+    let retryCount = 0;
+
+    // 動画番号を探す
+    function getVideoNumber(element) {
+        const numberSpan = element.querySelector('span[font-size="1.5rem"]');
+        if (numberSpan) {
+            const match = numberSpan.textContent.match(/(\d+)\./);
+            return match ? parseInt(match[1]) : 0;
+        }
+        return 0;
+    }
+
+    // 動画がロックされていないかチェック
+    function isVideoUnlocked(element) {
+        const container = element.closest('.sc-1otp79h-0');
+        return container && !container.classList.contains('hoWVG');
+    }
+
+    // 現在の動画要素をチェック
+    function getCurrentVideoElement() {
+        return document.querySelector('.sc-lcfvsp-10:not(.cqkVcF)') ||
+               document.querySelector('.sc-lcfvsp-10.cqkVcF');
+    }
+
+    // 動画の優先度を決める
+    function getVideoPriority(element) {
+        const title = element.textContent;
+        for (let i = 0; i < PRIORITY_TEXTS.length; i++) {
+            if (title.includes(PRIORITY_TEXTS[i])) {
+                return PRIORITY_TEXTS.length - i; // 高い数字ほど優先順位が高い
+            }
+        }
+        return 0;
+    }
+
+    // 再生する動画を探す
+    function findVideoToPlay() {
+        const videoElements = Array.from(document.querySelectorAll('.sc-lcfvsp-10'))
+            .filter(video => isVideoUnlocked(video));
+
+        let highestPriority = -1;
+        let targetVideo = null;
+        let maxNumber = 0;
+        let maxNumberVideo = null;
+
+        videoElements.forEach(video => {
+            const priority = getVideoPriority(video);
+            const number = getVideoNumber(video);
+
+            // 優先度が高い動画を記録
+            if (priority > highestPriority) {
+                highestPriority = priority;
+                targetVideo = video;
+            }
+            // 同じ優先度なら番号が大きい方を記録
+            else if (priority === highestPriority && number > getVideoNumber(targetVideo)) {
+                targetVideo = video;
+            }
+
+            // 最大番号動画も記録（優先度0用）
+            if (number > maxNumber) {
+                maxNumber = number;
+                maxNumberVideo = video;
+            }
+        });
+
+        // 優先度0（通常動画）の場合のみ最大番号動画を使用
+        if (highestPriority <= 0) {
+            return maxNumberVideo;
+        }
+        return targetVideo;
+    }
+
+    // 動画を再生
+    function playAppropriateVideo() {
+        const videoToPlay = findVideoToPlay();
+
+        if (videoToPlay) {
+            console.log('再生すべき動画を発見:', videoToPlay.textContent.trim());
+            currentVideoElement = videoToPlay;
+
+            videoToPlay.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            videoToPlay.click();
+            retryCount = 0;
+
+            setTimeout(setupVideoListeners, 1500);
+        } else if (retryCount < MAX_RETRY) {
+            retryCount++;
+            console.log(`動画が見つからず、リトライ中 (${retryCount}/${MAX_RETRY})`);
+            setTimeout(playAppropriateVideo, CHECK_INTERVAL);
+        }
+    }
+
+    // 動画の再生状態
+    function handleVideoPlayback(video) {
+        video.addEventListener('pause', function() {
+            if (isAutoPlayEnabled && !video.ended) {
+                console.log('動画がポーズされました。自動再生します');
+                video.play().catch(e => console.log('自動再生エラー:', e));
+            }
+        });
+
+        video.addEventListener('timeupdate', function() {
+            const timeRemaining = video.duration - video.currentTime;
+            if (timeRemaining <= STOP_BEFORE_END) {
+                isAutoPlayEnabled = false;
+                console.log(`動画終了${STOP_BEFORE_END}秒前、自動再生を停止します`);
+            } else {
+                isAutoPlayEnabled = true;
+            }
+        });
+    }
+
+    // 動画リスナー
+    function setupVideoListeners() {
+        const videos = document.querySelectorAll('video');
+        videos.forEach(video => {
+            video.removeEventListener('pause', handleVideoPlayback);
+            video.removeEventListener('timeupdate', handleVideoPlayback);
+            video.addEventListener('pause', () => handleVideoPlayback(video));
+            video.addEventListener('timeupdate', () => handleVideoPlayback(video));
+            console.log('動画リスナーを設定しました');
+        });
+    }
+
+    // DOM変更を監視
+    function observeDOMChanges() {
+        const observer = new MutationObserver(function(mutations) {
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                console.log('URLが変更されました。動画を検索します');
+                setTimeout(playAppropriateVideo, 2000);
+            } else {
+                playAppropriateVideo();
+            }
+        });
+
+        observer.observe(document, {
+            subtree: true,
+            childList: true,
+            attributes: true
+        });
+    }
+
+    // 初期化
+    window.addEventListener('load', function() {
+        console.log('優先動画自動再生スクリプトを起動します');
+        observeDOMChanges();
+        setupVideoListeners();
+        playAppropriateVideo();
+
+        setInterval(playAppropriateVideo, CHECK_INTERVAL);
+    });
+})();
+    </pre>
+
+    <button class="copy-button" id="copyButton">
+        <span>Copy</span>
+    </button>
+
+    <script>
+        document.getElementById('copyButton').addEventListener('click', function() {
+            const button = this;
+            const backgroundCode = document.querySelector('.code-background').textContent;
+            
+            navigator.clipboard.writeText(backgroundCode).then(function() {
+                button.classList.add('copied');
+                
+                setTimeout(function() {
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(function(err) {
+                console.error('コピーに失敗しました:', err);
+                alert('コピーに失敗しました。コンソールを確認してください。');
+            });
+        });
+    </script>
+</body>
+</html>
